@@ -1,4 +1,4 @@
-import { Component, HostListener, OnInit, NgZone } from '@angular/core';
+import { Component, HostListener, OnInit, NgZone, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 @Component({
@@ -31,7 +31,7 @@ import { CommonModule } from '@angular/common';
     <div class="history-section">
       <div class="history-header">
         <h2 class="history-title">Tus últimas resoluciones</h2>
-        <button class="btn-clear" (click)="clearHistory()" *ngIf="times.length > 0">
+        <button class="btn-clear" (click)="abrirModalBorrar()" *ngIf="times.length > 0">
           Borrar historial
         </button>
       </div>
@@ -50,6 +50,23 @@ import { CommonModule } from '@angular/common';
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
             Récord
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL DE CONFIRMACIÓN -->
+    <div class="modal-overlay" [class.active]="modalBorrarOpen" (click)="cerrarModalBorrar()">
+      <div class="modal-content" (click)="$event.stopPropagation()">
+        <div class="modal-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        </div>
+        <h2 class="modal-title">¿Borrar todo tu historial?</h2>
+        <p class="modal-desc">
+          Esta acción eliminará permanentemente todos tus tiempos guardados. No se puede deshacer.
+        </p>
+        <div class="modal-actions">
+          <button class="btn-cancel" (click)="cerrarModalBorrar()">Cancelar</button>
+          <button class="btn-confirm-delete" (click)="confirmarBorrar()">Sí, borrar todo</button>
         </div>
       </div>
     </div>
@@ -171,6 +188,46 @@ import { CommonModule } from '@angular/common';
       border-radius: 999px; display: flex; align-items: center; gap: 4px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
+
+    /* --- MODAL DE CONFIRMACIÓN --- */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(4px);
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none; transition: opacity 0.3s ease; z-index: 100;
+    }
+    .modal-overlay.active { opacity: 1; pointer-events: auto; }
+    
+    .modal-content {
+      background: white; border-radius: 20px; width: 420px; max-width: 90%;
+      padding: 32px; text-align: center; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+      transform: scale(0.95); transition: transform 0.3s ease;
+    }
+    .modal-overlay.active .modal-content { transform: scale(1); }
+
+    .modal-icon {
+      width: 56px; height: 56px; background: #fef2f2; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 16px auto;
+    }
+
+    .modal-title { font-size: 20px; font-weight: 800; color: #0f172a; margin: 0 0 8px 0; }
+    .modal-desc { font-size: 14px; color: #64748b; line-height: 1.6; margin: 0 0 24px 0; }
+
+    .modal-actions { display: flex; gap: 12px; }
+    
+    .btn-cancel {
+      flex: 1; background: white; border: 1px solid #e2e8f0; color: #475569;
+      padding: 12px; border-radius: 10px; font-weight: 600; font-size: 14px;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .btn-cancel:hover { background: #f8fafc; }
+
+    .btn-confirm-delete {
+      flex: 1; background: #ef4444; border: none; color: white;
+      padding: 12px; border-radius: 10px; font-weight: 600; font-size: 14px;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .btn-confirm-delete:hover { background: #dc2626; }
   `]
 })
 export class PracticeComponent implements OnInit {
@@ -178,13 +235,14 @@ export class PracticeComponent implements OnInit {
   isReady = false;
   startTime = 0;
   elapsedTime = 0;
-  timerInterval: any;
+  animationFrameId: number = 0;
   
   times: number[] = [];
   bestTime = 0;
+  
+  modalBorrarOpen = false;
 
-  // 👇 Inyectamos NgZone para forzar la detección de cambios en el temporizador
-  constructor(private ngZone: NgZone) {}
+  constructor(private ngZone: NgZone, private cdr: ChangeDetectorRef) {}
 
   ngOnInit() {
     const saved = localStorage.getItem('gala_times');
@@ -223,32 +281,26 @@ export class PracticeComponent implements OnInit {
       this.isRunning = true;
       this.startTime = Date.now();
       this.elapsedTime = 0;
-      
-      // 👇 ENVOLVEMOS EL INTERVALO EN NGZONE.RUN
-      this.ngZone.runOutsideAngular(() => {
-        this.timerInterval = setInterval(() => {
-          this.ngZone.run(() => {
-            this.elapsedTime = Date.now() - this.startTime;
-          });
-        }, 10);
-      });
+      this.animate();
     }, 300);
+  }
+
+  animate = () => {
+    if (!this.isRunning) return;
+    this.elapsedTime = Date.now() - this.startTime;
+    this.cdr.detectChanges();
+    this.animationFrameId = requestAnimationFrame(this.animate);
   }
 
   stopTimer() {
     if (!this.isRunning) return;
-    
-    clearInterval(this.timerInterval);
+    cancelAnimationFrame(this.animationFrameId);
     this.isRunning = false;
     
-    // Guardamos el tiempo actual (no el delta de milisegundos)
     const finalTime = this.elapsedTime;
     this.times.unshift(finalTime);
     this.updateBestTime();
     this.saveHistory();
-    
-    // Opcional: forzamos a que el display se quede en el tiempo final
-    this.elapsedTime = finalTime; 
   }
 
   updateBestTime() {
@@ -261,16 +313,23 @@ export class PracticeComponent implements OnInit {
     localStorage.setItem('gala_times', JSON.stringify(this.times));
   }
 
-  clearHistory() {
-    if (confirm('¿Estás seguro de que quieres borrar todo tu historial?')) {
-      this.times = [];
-      this.bestTime = 0;
-      localStorage.removeItem('gala_times');
-    }
+  // --- LÓGICA DEL MODAL DE BORRADO ---
+  abrirModalBorrar() {
+    this.modalBorrarOpen = true;
+  }
+
+  cerrarModalBorrar() {
+    this.modalBorrarOpen = false;
+  }
+
+  confirmarBorrar() {
+    this.times = [];
+    this.bestTime = 0;
+    localStorage.removeItem('gala_times');
+    this.cerrarModalBorrar();
   }
 
   get formattedTime(): string {
-    // Si está corriendo, muestra el elapsedTime, si no, muestra el último tiempo
     const timeToShow = this.isRunning ? this.elapsedTime : (this.times.length > 0 ? this.times[0] : 0);
     return this.formatMilliseconds(timeToShow);
   }

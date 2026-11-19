@@ -1,15 +1,16 @@
 import { Component, inject } from '@angular/core';
 import { RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
+import { CommonModule } from '@angular/common';
 import { AuthService } from '../../services/auth.service';
 
 @Component({
   selector: 'app-layout',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, CommonModule],
   template: `
     <div class="app-container">
-      
-      <!-- BARRA LATERAL -->
+
+      <!-- ================= SIDEBAR ================= -->
       <aside class="sidebar">
         <div class="sidebar-top">
           <div class="logo-container">
@@ -22,8 +23,10 @@ import { AuthService } from '../../services/auth.service';
           </div>
           <h1 class="logo-title">GALA</h1>
           <p class="logo-text">APRENDE. PRACTICA.<br>SUPÉRATE.</p>
-          
+
           <nav class="nav-menu">
+
+            <!-- PÚBLICAS -->
             <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}" class="nav-link">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
               Mi academia
@@ -48,10 +51,24 @@ import { AuthService } from '../../services/auth.service';
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
               Acceso por etapas
             </a>
-            <a routerLink="/pagos" routerLinkActive="active" class="nav-link">
+
+            <!-- ====== REGISTRAR PAGO (cualquier logueado) ====== -->
+            <a *ngIf="auth.currentUser()" routerLink="/pagos" routerLinkActive="active" class="nav-link">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-              Mis pagos
+              Registrar pago
             </a>
+
+            <!-- ====== SOLO ADMIN ====== -->
+            <a *ngIf="auth.isAdmin()" routerLink="/admin/pagos" routerLinkActive="active" class="nav-link">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+              Ver pagos
+            </a>
+            <a *ngIf="auth.isAdmin()" routerLink="/admin/videos" routerLinkActive="active" class="nav-link">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+              Subir vídeos
+            </a>
+
+            <!-- ====== PROGRESO (logueado) ====== -->
             <a routerLink="/progreso" routerLinkActive="active" class="nav-link">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
               Mi progreso
@@ -68,23 +85,29 @@ import { AuthService } from '../../services/auth.service';
         </div>
       </aside>
 
-      <!-- CONTENIDO PRINCIPAL -->
+      <!-- ================= CONTENIDO ================= -->
       <div class="main-wrapper">
-        
-        <!-- HEADER -->
         <header class="header">
           <div class="breadcrumb">
             Academia GALA / <span>Mi aprendizaje</span>
           </div>
+
           <div class="header-right">
             <div class="meta">
-              Tu próxima meta: 
+              Tu próxima meta:
               <strong>resolverlo</strong>
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-left: 4px;"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
             </div>
-            <div class="user-info">
+
+            <div class="auth-actions" *ngIf="!auth.currentUser()">
+              <a routerLink="/login" class="btn-login">Iniciar sesión</a>
+              <a routerLink="/register" class="btn-register">Registrarse</a>
+            </div>
+
+            <div class="user-info" *ngIf="auth.currentUser()">
               <span class="user-name">{{ auth.currentUser()?.name }}</span>
               <div class="avatar">{{ auth.currentUser()?.name?.charAt(0) }}</div>
+              <button class="btn-logout" (click)="auth.logout()">Salir</button>
             </div>
           </div>
         </header>
@@ -96,7 +119,8 @@ import { AuthService } from '../../services/auth.service';
     </div>
   `,
   styles: [`
-    /* --- ESTILOS GENERALES --- */
+    /* ================= BASE ================= */
+    * { box-sizing: border-box; }
     .app-container {
       display: flex;
       height: 100vh;
@@ -104,7 +128,7 @@ import { AuthService } from '../../services/auth.service';
       font-family: 'Inter', sans-serif;
     }
 
-    /* --- BARRA LATERAL (SIDEBAR) --- */
+    /* ================= SIDEBAR ================= */
     .sidebar {
       width: 260px;
       background: #ffffff;
@@ -119,6 +143,7 @@ import { AuthService } from '../../services/auth.service';
       top: 0;
       box-sizing: border-box;
       z-index: 20;
+      overflow-y: auto;
     }
     .logo-container {
       display: flex;
@@ -146,8 +171,8 @@ import { AuthService } from '../../services/auth.service';
       letter-spacing: 1px;
       margin-bottom: 32px;
     }
-    
-    /* --- MENÚ DE NAVEGACIÓN --- */
+
+    /* ================= NAV ================= */
     .nav-menu {
       display: flex;
       flex-direction: column;
@@ -174,20 +199,17 @@ import { AuthService } from '../../services/auth.service';
       color: #4338ca;
       font-weight: 600;
     }
-    .nav-link svg {
-      flex-shrink: 0;
-    }
+    .nav-link svg { flex-shrink: 0; }
 
-    /* --- TARJETA INFERIOR --- */
+    /* ================= SIDEBAR CARD ================= */
     .sidebar-card {
       background: #f8fafc;
       border: 1px solid #e2e8f0;
       border-radius: 16px;
       padding: 16px;
+      margin-top: 24px;
     }
-    .card-icon {
-      margin-bottom: 8px;
-    }
+    .card-icon { margin-bottom: 8px; }
     .card-title {
       font-size: 13px;
       font-weight: 700;
@@ -201,7 +223,7 @@ import { AuthService } from '../../services/auth.service';
       line-height: 1.4;
     }
 
-    /* --- CONTENIDO PRINCIPAL --- */
+    /* ================= MAIN ================= */
     .main-wrapper {
       margin-left: 260px;
       flex: 1;
@@ -210,7 +232,7 @@ import { AuthService } from '../../services/auth.service';
       min-height: 100vh;
     }
 
-    /* --- HEADER --- */
+    /* ================= HEADER ================= */
     .header {
       height: 64px;
       background: #ffffff;
@@ -222,10 +244,12 @@ import { AuthService } from '../../services/auth.service';
       position: sticky;
       top: 0;
       z-index: 10;
+      gap: 16px;
     }
     .breadcrumb {
       font-size: 14px;
       color: #64748b;
+      white-space: nowrap;
     }
     .breadcrumb span {
       color: #0f172a;
@@ -234,27 +258,70 @@ import { AuthService } from '../../services/auth.service';
     .header-right {
       display: flex;
       align-items: center;
-      gap: 24px;
+      gap: 20px;
+      flex-wrap: nowrap;
     }
     .meta {
       font-size: 13px;
       color: #64748b;
       display: flex;
       align-items: center;
+      white-space: nowrap;
     }
-    .meta strong {
-      color: #0f172a;
-      margin: 0 2px;
-    }
-    .user-info {
-      display: flex;
+    .meta strong { color: #0f172a; margin: 0 2px; }
+
+    /* ================= HEADER BOTONES ================= */
+    .auth-actions { display: flex; align-items: center; gap: 8px; }
+    .btn-login {
+      background: white;
+      color: #4f46e5;
+      border: 1px solid #c7d2fe;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      text-decoration: none;
+      display: inline-flex;
       align-items: center;
-      gap: 12px;
+      white-space: nowrap;
     }
+    .btn-login:hover { background: #eef2ff; }
+    .btn-register {
+      background: #4f46e5;
+      color: white;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      white-space: nowrap;
+    }
+    .btn-register:hover { background: #4338ca; }
+    .btn-logout {
+      background: #f1f5f9;
+      color: #334155;
+      border: 1px solid #e2e8f0;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .btn-logout:hover { background: #e2e8f0; }
+
+    /* ================= USER INFO ================= */
+    .user-info { display: flex; align-items: center; gap: 10px; }
     .user-name {
       font-size: 13px;
       font-weight: 500;
       color: #334155;
+      max-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .avatar {
       width: 32px;
@@ -267,12 +334,24 @@ import { AuthService } from '../../services/auth.service';
       justify-content: center;
       font-weight: 700;
       font-size: 14px;
+      flex-shrink: 0;
     }
 
-    /* --- CONTENIDO --- */
+    /* ================= CONTENT ================= */
     .content {
       padding: 32px;
       flex: 1;
+    }
+
+    /* ================= RESPONSIVE ================= */
+    @media (max-width: 1024px) {
+      .meta { display: none; }
+      .user-name { display: none; }
+    }
+    @media (max-width: 768px) {
+      .header { padding: 0 16px; }
+      .breadcrumb { font-size: 12px; }
+      .content { padding: 16px; }
     }
   `]
 })

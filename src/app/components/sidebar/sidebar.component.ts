@@ -1,11 +1,12 @@
 import { Component, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
+import { CommonModule } from '@angular/common';
 import { AuthService } from '../../services/auth.service';
 
 @Component({
   selector: 'app-sidebar',
   standalone: true,
-  imports: [RouterLink, RouterLinkActive],
+  imports: [RouterLink, RouterLinkActive, CommonModule],
   template: `
     <aside class="sidebar">
       <!-- LOGO -->
@@ -44,10 +45,13 @@ import { AuthService } from '../../services/auth.service';
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
           Acceso por etapas
         </a>
-        <a routerLink="/pagos" routerLinkActive="active" class="nav-link">
+
+        <!-- SOLO ADMIN: Ver pagos -->
+        <a *ngIf="auth.isAdmin()" routerLink="/pagos" routerLinkActive="active" class="nav-link">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-          Mis pagos
+          Ver pagos
         </a>
+
         <a routerLink="/progreso" routerLinkActive="active" class="nav-link">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
           Mi progreso
@@ -80,46 +84,13 @@ import { AuthService } from '../../services/auth.service';
       z-index: 20;
     }
 
-    /* --- LOGO --- */
-    .logo-section {
-      margin-bottom: 32px;
-    }
-    .logo-top {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 4px;
-    }
-    .logo-tag {
-      font-size: 10px;
-      font-weight: 700;
-      color: #94a3b8;
-      letter-spacing: 1.5px;
-    }
-    .logo-title {
-      font-size: 26px;
-      font-weight: 900;
-      color: #4338ca;
-      letter-spacing: -1px;
-      margin: 0;
-    }
-    .logo-sub {
-      font-size: 10px;
-      color: #94a3b8;
-      margin: 8px 0 0 0;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-      line-height: 1.4;
-    }
+    .logo-section { margin-bottom: 32px; }
+    .logo-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .logo-tag { font-size: 10px; font-weight: 700; color: #94a3b8; letter-spacing: 1.5px; }
+    .logo-title { font-size: 26px; font-weight: 900; color: #4338ca; letter-spacing: -1px; margin: 0; }
+    .logo-sub { font-size: 10px; color: #94a3b8; margin: 8px 0 0 0; font-weight: 600; letter-spacing: 0.5px; line-height: 1.4; }
 
-    /* --- MENÚ --- */
-    .nav-menu {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      overflow-y: auto;
-    }
+    .nav-menu { flex: 1; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
     .nav-link {
       display: flex;
       align-items: center;
@@ -132,40 +103,14 @@ import { AuthService } from '../../services/auth.service';
       border-radius: 8px;
       transition: all 0.2s ease;
     }
-    .nav-link:hover {
-      background: #f8fafc;
-      color: #1e293b;
-    }
-    .nav-link.active {
-      background: #eef2ff;
-      color: #4338ca;
-      font-weight: 600;
-    }
-    .nav-link svg {
-      flex-shrink: 0;
-    }
+    .nav-link:hover { background: #f8fafc; color: #1e293b; }
+    .nav-link.active { background: #eef2ff; color: #4338ca; font-weight: 600; }
+    .nav-link svg { flex-shrink: 0; }
 
-    /* --- TARJETA INFERIOR --- */
-    .bottom-card {
-      margin-top: auto;
-      padding-top: 24px;
-      border-top: 1px solid #f1f5f9;
-    }
-    .card-icon {
-      margin-bottom: 6px;
-    }
-    .card-title {
-      font-size: 12px;
-      font-weight: 700;
-      color: #1e293b;
-      margin: 0;
-    }
-    .card-desc {
-      font-size: 11px;
-      color: #64748b;
-      margin: 4px 0 0 0;
-      line-height: 1.4;
-    }
+    .bottom-card { margin-top: auto; padding-top: 24px; border-top: 1px solid #f1f5f9; }
+    .card-icon { margin-bottom: 6px; }
+    .card-title { font-size: 12px; font-weight: 700; color: #1e293b; margin: 0; }
+    .card-desc { font-size: 11px; color: #64748b; margin: 4px 0 0 0; line-height: 1.4; }
   `]
 })
 export class SidebarComponent {
