@@ -1,6 +1,6 @@
 export const environment = {
   production: true,
-  apiUrl: 'https://api.galacubos.com/api',
-  backendUrl: 'https://api.galacubos.com',
+  apiUrl: 'https://academia-backend-vpmu.onrender.com/api',
+  backendUrl: 'https://academia-backend-vpmu.onrender.com',
   cloudinaryCloudName: 'yyxtnl8l'
 };
