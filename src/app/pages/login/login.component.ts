@@ -76,13 +76,6 @@ import { AuthService } from '../../services/auth.service';
           <a routerLink="/register">Regístrate aquí</a>
         </p>
 
-        <!-- Credenciales de prueba -->
-        <div class="demo-box">
-          <div class="demo-title">Credenciales de prueba</div>
-          <div class="demo-row"><strong>Admin:</strong> victor@galacubos.com / password123</div>
-          <div class="demo-row"><strong>Alumno:</strong> alumno@galacubos.com / password123</div>
-        </div>
-
       </div>
     </div>
   `,
@@ -273,29 +266,6 @@ import { AuthService } from '../../services/auth.service';
     .register-link a:hover { text-decoration: underline; }
 
     /* ========================================================= */
-    /* DEMO BOX                                                  */
-    /* ========================================================= */
-    .demo-box {
-      margin-top: 24px;
-      padding: 14px 16px;
-      background: #f8fafc;
-      border: 1px dashed #cbd5e1;
-      border-radius: 10px;
-      font-size: 12px;
-      color: #475569;
-      line-height: 1.6;
-    }
-    .demo-title {
-      font-size: 11px;
-      font-weight: 700;
-      color: #64748b;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 6px;
-    }
-    .demo-row strong { color: #334155; }
-
-    /* ========================================================= */
     /* RESPONSIVE                                                */
     /* ========================================================= */
     @media (max-width: 480px) {
@@ -310,7 +280,6 @@ import { AuthService } from '../../services/auth.service';
       .login-subtitle { font-size: 13px; margin-bottom: 20px; }
       .input-wrap input { padding: 11px 12px 11px 40px; font-size: 14px; }
       .btn-submit { padding: 12px; font-size: 14px; }
-      .demo-box { font-size: 11px; padding: 12px 14px; }
     }
 
     @media (max-width: 360px) {

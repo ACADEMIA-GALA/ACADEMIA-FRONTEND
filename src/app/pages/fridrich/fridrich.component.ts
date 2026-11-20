@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
@@ -25,7 +25,7 @@ interface StageVideo {
       </p>
     </div>
 
-    <!-- TABS DE ETAPAS (DINÁMICAS) -->
+    <!-- TABS DE ETAPAS -->
     <div class="stages-tabs">
       <div
         class="stage-tab"
@@ -78,21 +78,44 @@ interface StageVideo {
             Etapa desbloqueada · Contenido disponible
           </div>
 
-          <div *ngIf="loadingVideos" class="loading-text">Cargando vídeos...</div>
+          <!-- 🔧 FIX: mensaje de "sesión cargando" mientras esperamos token -->
+          <div *ngIf="waitingForSession" class="loading-text">
+            Cargando tu sesión...
+          </div>
 
-          <div *ngIf="!loadingVideos && videos.length === 0" class="empty-videos">
+          <div *ngIf="!waitingForSession && loadingVideos" class="loading-text">
+            Cargando vídeos...
+          </div>
+
+          <div *ngIf="!waitingForSession && !loadingVideos && videos.length === 0" class="empty-videos">
             Aún no hay vídeos para esta etapa. El administrador los subirá pronto.
           </div>
 
-          <div class="video-list" *ngIf="!loadingVideos && videos.length > 0">
-            <div class="video-card" *ngFor="let v of videos">
+          <div class="video-list" *ngIf="!waitingForSession && !loadingVideos && videos.length > 0">
+            <div class="video-card" *ngFor="let v of videos; trackBy: trackByVideoId">
               <h4 class="video-title">{{ v.title }}</h4>
-              <video
-                [src]="v.url"
-                controls
-                preload="metadata"
-                class="video-player">
-              </video>
+
+              <div class="video-wrapper">
+                <video
+                  *ngIf="v.url"
+                  [src]="sanitizeVideoUrl(v.url)"
+                  type="video/mp4"
+                  controls
+                  playsinline
+                  preload="auto"
+                  controlsList="nodownload"
+                  class="video-player"
+                  (error)="onVideoError($event, v)">
+                  Tu navegador no soporta la reproducción de video.
+                </video>
+
+                <div class="video-fallback">
+                   <a [href]="v.url" target="_blank" rel="noopener noreferrer" class="btn-open-video">
+                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                     Abrir vídeo en otra pestaña
+                   </a>
+                </div>
+              </div>
             </div>
           </div>
         </ng-container>
@@ -135,7 +158,7 @@ interface StageVideo {
       </div>
 
       <div class="qr-container">
-        <img src="assets/pago/pago.jpg" alt="QR de Yape" class="qr-image" />
+        <img src="assets/pago/pago.jpg" alt="QR de Yape" class="qr-image" width="160" height="160" />
         <p class="qr-note">Escanea o yapea al +51 957 771 432</p>
       </div>
     </div>
@@ -146,13 +169,14 @@ interface StageVideo {
     </div>
   `,
   styles: [`
-    /* --- ESTILOS BASE --- */
+    :host { display: block; width: 100%; box-sizing: border-box; }
+    * { box-sizing: border-box; }
+
     .page-header { margin-bottom: 32px; }
     .tag-amber { font-size: 12px; font-weight: 700; color: #d97706; letter-spacing: 1.5px; margin-bottom: 8px; text-transform: uppercase; }
     .page-title { font-size: 32px; font-weight: 800; color: #0f172a; margin: 0 0 8px 0; line-height: 1.2; }
     .page-subtitle { font-size: 15px; color: #64748b; margin: 0; max-width: 700px; line-height: 1.6; }
 
-    /* --- TABS DE ETAPAS --- */
     .stages-tabs {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -166,36 +190,19 @@ interface StageVideo {
       padding: 16px;
       text-align: center;
       cursor: pointer;
+      transition: all 0.2s;
     }
-    .stage-tab.active {
-      border-color: #d97706;
-      background: #fffbeb;
-    }
-    .stage-tab.unlocked {
-      border-color: #34d399;
-    }
-    .stage-tab.unlocked.active {
-      border-color: #059669;
-      background: #ecfdf5;
-    }
-    .stage-name {
-      font-size: 16px;
-      font-weight: 800;
-      color: #0f172a;
-      margin-bottom: 4px;
-    }
+    .stage-tab:hover { border-color: #cbd5e1; }
+    .stage-tab.active { border-color: #d97706; background: #fffbeb; }
+    .stage-tab.unlocked { border-color: #34d399; }
+    .stage-tab.unlocked.active { border-color: #059669; background: #ecfdf5; }
+    .stage-name { font-size: 16px; font-weight: 800; color: #0f172a; margin-bottom: 4px; }
     .stage-lock {
-      font-size: 11px;
-      font-weight: 600;
-      color: #64748b;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
+      font-size: 11px; font-weight: 600; color: #64748b;
+      display: flex; align-items: center; justify-content: center; gap: 4px;
     }
     .unlocked-text { color: #059669; }
 
-    /* --- LAYOUT PRINCIPAL --- */
     .main-layout {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -203,7 +210,6 @@ interface StageVideo {
       margin-bottom: 32px;
     }
 
-    /* --- TARJETA DE LECCIÓN --- */
     .lesson-card {
       background: white;
       border: 1px solid #e2e8f0;
@@ -221,55 +227,30 @@ interface StageVideo {
     .price-note { font-size: 12px; color: #94a3b8; margin-top: 4px; }
 
     .btn-pay {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      width: 100%;
-      background: #d97706;
-      color: white;
-      padding: 14px;
-      border-radius: 12px;
-      font-weight: 700;
-      text-decoration: none;
-      margin-bottom: 16px;
-      box-sizing: border-box;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; background: #d97706; color: white;
+      padding: 14px; border-radius: 12px;
+      font-weight: 700; text-decoration: none;
+      margin-bottom: 16px; box-sizing: border-box;
+      transition: background 0.2s;
     }
+    .btn-pay:hover { background: #b45309; }
 
     .lock-note {
-      font-size: 12px;
-      color: #64748b;
-      text-align: center;
-      line-height: 1.5;
-      margin: 0;
+      font-size: 12px; color: #64748b;
+      text-align: center; line-height: 1.5; margin: 0;
     }
 
-    /* --- DESBLOQUEADO --- */
     .unlocked-banner {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: #ecfdf5;
-      border: 1px solid #a7f3d0;
-      color: #047857;
-      padding: 12px 16px;
-      border-radius: 10px;
-      font-size: 14px;
-      font-weight: 600;
+      display: flex; align-items: center; gap: 8px;
+      background: #ecfdf5; border: 1px solid #a7f3d0;
+      color: #047857; padding: 12px 16px;
+      border-radius: 10px; font-size: 14px; font-weight: 600;
       margin-bottom: 20px;
     }
 
-    .loading-text {
-      color: #64748b;
-      font-size: 14px;
-      padding: 20px 0;
-    }
-    .empty-videos {
-      color: #94a3b8;
-      font-size: 14px;
-      padding: 20px 0;
-      font-style: italic;
-    }
+    .loading-text { color: #64748b; font-size: 14px; padding: 20px 0; }
+    .empty-videos { color: #94a3b8; font-size: 14px; padding: 20px 0; font-style: italic; }
 
     .video-list { display: flex; flex-direction: column; gap: 20px; }
     .video-card {
@@ -279,19 +260,34 @@ interface StageVideo {
       background: #f8fafc;
     }
     .video-title {
-      font-size: 15px;
-      font-weight: 700;
-      color: #0f172a;
-      margin: 0 0 12px 0;
+      font-size: 15px; font-weight: 700;
+      color: #0f172a; margin: 0 0 12px 0;
     }
+
+    .video-wrapper { position: relative; width: 100%; }
+
     .video-player {
       width: 100%;
       border-radius: 10px;
       background: black;
       max-height: 320px;
+      display: block;
+      object-fit: contain;
     }
 
-    /* --- TARJETA DE INFORMACIÓN --- */
+    .video-fallback { margin-top: 8px; text-align: right; }
+
+    .btn-open-video {
+      font-size: 12px;
+      color: #4f46e5;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 600;
+    }
+    .btn-open-video:hover { text-decoration: underline; }
+
     .info-card {
       background: #fffbeb;
       border: 1px solid #fde68a;
@@ -300,75 +296,51 @@ interface StageVideo {
     }
     .info-title { font-size: 18px; font-weight: 800; color: #92400e; margin: 0 0 16px 0; }
     .features-list {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      list-style: none; padding: 0; margin: 0;
+      display: flex; flex-direction: column; gap: 12px;
     }
     .features-list li {
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      font-size: 14px;
-      color: #78350f;
-      line-height: 1.5;
+      display: flex; align-items: flex-start; gap: 8px;
+      font-size: 14px; color: #78350f; line-height: 1.5;
     }
     .features-list svg { flex-shrink: 0; margin-top: 2px; }
 
-    /* --- SECCIÓN DE PAGO --- */
     .payment-section {
       background: white;
       border: 1px solid #e2e8f0;
       border-radius: 16px;
       padding: 32px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 32px;
-      margin-bottom: 32px;
-      flex-wrap: wrap;
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 32px; margin-bottom: 32px; flex-wrap: wrap;
     }
     .payment-content { flex: 1 1 300px; }
     .payment-title { font-size: 20px; font-weight: 800; color: #0f172a; margin: 0 0 8px 0; }
     .payment-desc { font-size: 14px; color: #64748b; line-height: 1.6; margin: 0 0 16px 0; }
 
     .btn-secondary {
-      display: inline-block;
-      background: white;
-      color: #4f46e5;
-      border: 1px solid #e0e7ff;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-weight: 600;
-      text-decoration: none;
-      font-size: 14px;
+      display: inline-block; background: white; color: #4f46e5;
+      border: 1px solid #e0e7ff; padding: 10px 20px;
+      border-radius: 8px; font-weight: 600;
+      text-decoration: none; font-size: 14px;
+      transition: background 0.2s;
     }
+    .btn-secondary:hover { background: #eef2ff; }
 
     .qr-container { text-align: center; flex-shrink: 0; }
     .qr-image {
-      width: 160px;
-      height: auto;
+      width: 160px; height: auto;
       border-radius: 12px;
       border: 1px solid #e2e8f0;
       margin-bottom: 8px;
     }
     .qr-note { font-size: 12px; color: #64748b; margin: 0; font-weight: 500; }
 
-    /* --- FOOTER --- */
     .footer-note {
-      text-align: center;
-      font-size: 12px;
-      color: #94a3b8;
-      line-height: 1.6;
-      padding-bottom: 32px;
+      text-align: center; font-size: 12px;
+      color: #94a3b8; line-height: 1.6; padding-bottom: 32px;
     }
 
-    /* --- RESPONSIVE --- */
-    @media (max-width: 900px) {
-      .main-layout { grid-template-columns: 1fr; }
-    }
+    @media (max-width: 900px) { .main-layout { grid-template-columns: 1fr; } }
     @media (max-width: 600px) {
       .page-title { font-size: 24px; }
       .lesson-card { padding: 20px; }
@@ -378,12 +350,12 @@ interface StageVideo {
     }
   `]
 })
-export class FridrichComponent implements OnInit {
+export class FridrichComponent implements OnInit, OnDestroy {
   auth = inject(AuthService);
   private http = inject(HttpClient);
+  private cdr = inject(ChangeDetectorRef);
   private apiUrl = 'http://localhost:3000/api';
 
-  // Etapas con su short, nombre real (usado en pagos) y descripción
   stages = [
     { short: 'CRUZ', name: 'Cruz eficiente', desc: 'Planificación y cruz blanca. Lección y ejemplo animado.' },
     { short: 'F2L', name: 'F2L', desc: 'Las dos primeras capas emparejando esquinas y aristas sin romper la cruz.' },
@@ -395,11 +367,59 @@ export class FridrichComponent implements OnInit {
   videos: StageVideo[] = [];
   loadingVideos = false;
 
+  // 🔧 FIX: estado para saber si aún estamos esperando el token
+  waitingForSession = true;
+
+  // 🔧 FIX: timers para poder limpiarlos en ngOnDestroy
+  private retryTimeout: any = null;
+  private videoRetryTimeout: any = null;
+
   ngOnInit() {
-    // Etapa inicial: la primera desbloqueada; si no hay, la primera
-    const primeraDesbloqueada = this.stages.find(s => this.isUnlocked(s.name));
-    this.selectedStage = primeraDesbloqueada ? primeraDesbloqueada.name : this.stages[0].name;
-    this.loadVideosIfUnlocked();
+    // 🔧 FIX: NO cargar nada hasta tener token válido
+    this.waitForSessionAndLoad();
+  }
+
+  ngOnDestroy() {
+    if (this.retryTimeout) clearTimeout(this.retryTimeout);
+    if (this.videoRetryTimeout) clearTimeout(this.videoRetryTimeout);
+  }
+
+  /**
+   * 🔧 FIX CLAVE: espera a que AuthService tenga token antes de pedir nada.
+   * Sin esto, ngOnInit disparaba la petición con token=null y el backend
+   * respondía 401 "Token no proporcionado" → videos=[] → "Aún no hay vídeos".
+   */
+  private waitForSessionAndLoad(attempt = 0) {
+    const token = this.getValidToken();
+
+    if (token) {
+      this.waitingForSession = false;
+      const primeraDesbloqueada = this.stages.find(s => this.isUnlocked(s.name));
+      this.selectedStage = primeraDesbloqueada ? primeraDesbloqueada.name : this.stages[0].name;
+      this.loadVideosIfUnlocked();
+      return;
+    }
+
+    if (attempt >= 30) {
+      // ~3 segundos esperando. Si no hay token, el usuario no está logueado.
+      console.error('[Fridrich] No se pudo obtener token tras 3s. ¿Estás logueado?');
+      this.waitingForSession = false;
+      this.loadingVideos = false;
+      return;
+    }
+
+    this.retryTimeout = setTimeout(() => this.waitForSessionAndLoad(attempt + 1), 100);
+  }
+
+  /**
+   * 🔧 FIX: helper que valida que el token existe y no es el string literal "null"/"undefined"
+   * (esto pasa cuando se hace `Bearer ${null}` y se guarda como string)
+   */
+  private getValidToken(): string | null {
+    const token = this.auth.getToken();
+    if (!token) return null;
+    if (token === 'null' || token === 'undefined') return null;
+    return token;
   }
 
   get currentStageData() {
@@ -420,28 +440,85 @@ export class FridrichComponent implements OnInit {
   }
 
   private headers(): HttpHeaders {
-    return new HttpHeaders().set('Authorization', `Bearer ${this.auth.getToken()}`);
+    const token = this.getValidToken();
+    if (!token) {
+      console.warn('[Fridrich] headers() llamado sin token válido');
+      return new HttpHeaders();
+    }
+    return new HttpHeaders().set('Authorization', `Bearer ${token}`);
   }
 
+  /**
+   * 🔧 FIX: trackBy para que Angular no destruya/recreé los <video>
+   */
+  trackByVideoId(index: number, video: StageVideo): number {
+    return video.id;
+  }
+
+  /**
+   * 🔧 FIX: si Cloudinary devolvió .mov/.webm, forzamos .mp4 para que el navegador lo reproduzca
+   */
+  sanitizeVideoUrl(url: string): string {
+    if (!url) return '';
+    return url.replace(/\.(mov|webm|avi|mkv)$/i, '.mp4');
+  }
+
+  /**
+   * 🔧 FIX: no dispara la petición si no hay token. Se auto-reintenta.
+   */
   loadVideosIfUnlocked() {
     if (!this.isUnlocked(this.selectedStage)) {
       this.videos = [];
+      this.loadingVideos = false;
+      return;
+    }
+
+    const token = this.getValidToken();
+    if (!token) {
+      console.warn('[Fridrich] Sin token válido, reintentando carga de vídeos en 200ms...');
+      this.videoRetryTimeout = setTimeout(() => this.loadVideosIfUnlocked(), 200);
       return;
     }
 
     this.loadingVideos = true;
+    console.log(`[Fridrich] Cargando vídeos para: ${this.selectedStage}`);
+
     this.http.get<StageVideo[]>(
       `${this.apiUrl}/stage-videos/${encodeURIComponent(this.selectedStage)}`,
       { headers: this.headers() }
     ).subscribe({
       next: (data) => {
-        this.videos = data;
+        this.videos = Array.isArray(data) ? data : [];
         this.loadingVideos = false;
+        this.cdr.detectChanges();
+        console.log(`[Fridrich] Vídeos cargados (${this.videos.length}):`, this.videos);
+        this.videos.forEach(v => {
+          console.log('[Fridrich] URL sanitizada:', v.title, '→', this.sanitizeVideoUrl(v.url));
+        });
       },
-      error: () => {
+      error: (err) => {
+        console.error('[Fridrich] Error cargando vídeos:', err.status, err.error);
         this.videos = [];
         this.loadingVideos = false;
+        this.cdr.detectChanges();
+
+        // 🔧 FIX: si fue 401 por token caducado, avisamos al usuario
+        if (err.status === 401) {
+          console.warn('[Fridrich] Token caducado. Vuelve a iniciar sesión.');
+        }
       }
+    });
+  }
+
+  onVideoError(event: Event, video: StageVideo) {
+    const el = event.target as HTMLVideoElement;
+    console.error('[Fridrich] Error al reproducir video:', {
+      title: video.title,
+      url: video.url,
+      errorCode: el.error?.code,
+      errorMessage: el.error?.message,
+      networkState: el.networkState,
+      readyState: el.readyState,
     });
   }
 }

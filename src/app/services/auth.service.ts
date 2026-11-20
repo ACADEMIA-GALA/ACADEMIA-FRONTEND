@@ -1,7 +1,8 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { tap } from 'rxjs/operators';
+import { tap, catchError } from 'rxjs/operators';
+import { throwError } from 'rxjs';
 import { User, Payment } from '../models/user.model';
 import { environment } from '../../environments/environment';
 
@@ -18,8 +19,6 @@ export class AuthService {
   constructor(private http: HttpClient, private router: Router) {
     this.loadSession();
 
-    // Solo carga pagos si hay token y NO está expirado.
-    // Si no hay sesión válida, limpia silenciosamente SIN redirigir.
     if (this.isSessionValid()) {
       this.loadPayments();
     } else {
@@ -54,34 +53,33 @@ export class AuthService {
 
   logout() {
     this.clearSession();
-    // La app es pública → volvemos al dashboard, no al login
     this.router.navigate(['/']);
   }
 
   getToken(): string | null {
-    return localStorage.getItem('gala_token');
+    return sessionStorage.getItem('gala_token');
   }
 
   isAdmin(): boolean {
     return this.currentUser()?.role === 'admin';
   }
 
-  // --- SESIÓN ---
+  // --- SESIÓN (sessionStorage: cada pestaña tiene su propia sesión) ---
   private saveSession(token: string, user: User) {
-    localStorage.setItem('gala_token', token);
-    localStorage.setItem('gala_user', JSON.stringify(user));
+    sessionStorage.setItem('gala_token', token);
+    sessionStorage.setItem('gala_user', JSON.stringify(user));
     this.currentUser.set(user);
   }
 
   private clearSession() {
-    localStorage.removeItem('gala_token');
-    localStorage.removeItem('gala_user');
+    sessionStorage.removeItem('gala_token');
+    sessionStorage.removeItem('gala_user');
     this.currentUser.set(null);
     this.payments.set([]);
   }
 
   private loadSession() {
-    const userJson = localStorage.getItem('gala_user');
+    const userJson = sessionStorage.getItem('gala_user');
     if (userJson) {
       try {
         this.currentUser.set(JSON.parse(userJson));
@@ -104,12 +102,13 @@ export class AuthService {
   }
 
   private authHeaders(): HttpHeaders {
-    return new HttpHeaders().set('Authorization', `Bearer ${this.getToken()}`);
+    const token = this.getToken();
+    return new HttpHeaders().set('Authorization', `Bearer ${token || ''}`);
   }
 
   /**
    * Solo cerramos sesión si el token es inválido/expirado (401).
-   * Un 403 significa "logueado pero sin permiso" → NO se desloguea.
+   * Un 403 significa "logueado pero sin permiso" -> NO se desloguea.
    */
   private handleAuthError(err: any) {
     if (err?.status === 401) {
@@ -129,7 +128,13 @@ export class AuthService {
       `${this.apiUrl}/payments`,
       formData,
       { headers: this.authHeaders() }
-    ).pipe(tap(() => this.loadPayments()));
+    ).pipe(
+      tap(() => this.loadPayments()),
+      catchError(err => {
+        this.handleAuthError(err);
+        return throwError(() => err);
+      })
+    );
   }
 
   loadPayments() {
@@ -155,6 +160,11 @@ export class AuthService {
     return this.http.get<Payment[]>(
       `${this.apiUrl}/admin/payments`,
       { headers: this.authHeaders() }
+    ).pipe(
+      catchError(err => {
+        this.handleAuthError(err);
+        return throwError(() => err);
+      })
     );
   }
 
@@ -163,11 +173,17 @@ export class AuthService {
       `${this.apiUrl}/admin/payments/${id}/approve`,
       {},
       { headers: this.authHeaders() }
-    ).pipe(tap(() => this.loadPayments()));
+    ).pipe(
+      tap(() => this.loadPayments()),
+      catchError(err => {
+        this.handleAuthError(err);
+        return throwError(() => err);
+      })
+    );
   }
 
   // --- HELPERS ---
-  /** '/uploads/yape-xxx.jpg' → 'http://localhost:3000/uploads/yape-xxx.jpg' */
+  /** '/uploads/yape-xxx.jpg' -> 'http://localhost:3000/uploads/yape-xxx.jpg' */
   getScreenshotUrl(screenshotPath: string | null | undefined): string {
     if (!screenshotPath) return '';
     if (screenshotPath.startsWith('http')) return screenshotPath;

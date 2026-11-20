@@ -1,8 +1,10 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
 import { Payment } from '../../models/user.model';
+import { timeout, catchError } from 'rxjs/operators';
+import { of } from 'rxjs';
 
 @Component({
   standalone: true,
@@ -10,7 +12,7 @@ import { Payment } from '../../models/user.model';
   template: `
     <div class="admin-container">
 
-      <!-- BARRA SUPERIOR: volver + salir -->
+      <!-- BARRA SUPERIOR -->
       <div class="admin-topbar">
         <a routerLink="/" class="btn-back">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
@@ -40,60 +42,82 @@ import { Payment } from '../../models/user.model';
         </p>
       </div>
 
-      <!-- ESTADOS -->
-      <div *ngIf="loading" class="loading">Cargando pagos...</div>
+      <!-- CARGANDO -->
+      <div *ngIf="loading" class="loading">
+        <div class="spinner"></div>
+        <span>Cargando pagos...</span>
+      </div>
 
-      <div *ngIf="!loading && payments.length === 0" class="empty">
+      <!-- ERROR (solo si no hay datos) -->
+      <div *ngIf="!loading && errorMsg && payments.length === 0" class="error-box">
+        <p>{{ errorMsg }}</p>
+        <button class="btn-retry" (click)="loadPayments()">Reintentar</button>
+      </div>
+
+      <!-- VACÍO -->
+      <div *ngIf="!loading && !errorMsg && payments.length === 0" class="empty">
         Aún no hay pagos registrados.
       </div>
 
-      <!-- TABLA -->
-      <table class="payment-table" *ngIf="!loading && payments.length > 0">
-        <thead>
-          <tr>
-            <th>ID Pago</th>
-            <th>Usuario</th>
-            <th>Etapa</th>
-            <th>Monto</th>
-            <th>Código Yape</th>
-            <th>Fecha</th>
-            <th>Estado</th>
-            <th>Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let p of payments">
-            <td>{{ p.id }}</td>
-            <td>{{ p.userName }}</td>
-            <td>{{ p.stage }}</td>
-            <td>S/ {{ p.amount }}</td>
-            <td><code>{{ p.operationCode }}</code></td>
-            <td>{{ p.date }}</td>
-            <td>
-              <span [class]="p.status === 'aprobado' ? 'badge-success' : 'badge-warning'">
-                {{ p.status | uppercase }}
-              </span>
-            </td>
-            <td>
-              <button *ngIf="p.status === 'pendiente'"
-                      (click)="approve(p.id)"
-                      [disabled]="approvingId === p.id"
-                      class="btn-approve">
-                {{ approvingId === p.id ? 'Aprobando...' : 'Aprobar' }}
-              </button>
-              <span *ngIf="p.status === 'aprobado'" class="approved-text">✔ Aprobado</span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <!-- TABLA (no depende de errorMsg) -->
+      <div class="table-wrap" *ngIf="!loading && payments.length > 0">
+        <table class="payment-table">
+          <thead>
+            <tr>
+              <th>ID Pago</th>
+              <th>Usuario</th>
+              <th>Etapa</th>
+              <th>Monto</th>
+              <th>Código Yape</th>
+              <th>Fecha</th>
+              <th>Estado</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let p of payments">
+              <td>{{ p.id }}</td>
+              <td>{{ p.userName }}</td>
+              <td>{{ p.stage }}</td>
+              <td>S/ {{ p.amount }}</td>
+              <td><code>{{ p.operationCode }}</code></td>
+              <td>{{ p.date }}</td>
+              <td>
+                <span [class]="p.status === 'aprobado' ? 'badge-success' : 'badge-warning'">
+                  {{ p.status | uppercase }}
+                </span>
+              </td>
+              <td>
+                <button *ngIf="p.status === 'pendiente'"
+                        (click)="approve(p.id)"
+                        [disabled]="approvingId === p.id"
+                        class="btn-approve">
+                  {{ approvingId === p.id ? 'Aprobando...' : 'Aprobar' }}
+                </button>
+                <span *ngIf="p.status === 'aprobado'" class="approved-text">Aprobado</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- MENSAJES DE ACCIÓN -->
+      <div *ngIf="actionMsg" class="inline-msg success">{{ actionMsg }}</div>
+      <div *ngIf="actionError" class="inline-msg error">{{ actionError }}</div>
     </div>
   `,
   styles: [`
+    :host {
+      display: block;
+      font-family: 'Inter', sans-serif;
+      box-sizing: border-box;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+
     .admin-container {
       padding: 24px 32px;
       max-width: 1200px;
       margin: 0 auto;
-      font-family: 'Inter', sans-serif;
     }
 
     /* --- BARRA SUPERIOR --- */
@@ -145,6 +169,7 @@ import { Payment } from '../../models/user.model';
       font-size: 13px;
       cursor: pointer;
       transition: background 0.15s;
+      font-family: inherit;
     }
     .btn-logout:hover { background: #e2e8f0; }
 
@@ -155,23 +180,38 @@ import { Payment } from '../../models/user.model';
       font-weight: 800;
       color: #0f172a;
       margin: 0 0 6px 0;
+      line-height: 1.3;
     }
     .admin-sub {
       font-size: 14px;
       color: #64748b;
       margin: 0;
+      line-height: 1.5;
     }
 
     /* --- ESTADOS --- */
     .loading {
+      display: flex;
+      align-items: center;
+      gap: 12px;
       color: #64748b;
       font-size: 14px;
-      padding: 20px 0;
+      padding: 24px 0;
     }
+    .spinner {
+      width: 22px;
+      height: 22px;
+      border: 3px solid #e2e8f0;
+      border-top-color: #4f46e5;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     .empty {
       color: #94a3b8;
       font-size: 14px;
-      padding: 20px 0;
+      padding: 24px;
       font-style: italic;
       background: #f8fafc;
       border: 1px dashed #e2e8f0;
@@ -179,14 +219,42 @@ import { Payment } from '../../models/user.model';
       text-align: center;
     }
 
+    .error-box {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #b91c1c;
+      padding: 20px;
+      border-radius: 12px;
+      font-size: 14px;
+      text-align: center;
+    }
+    .error-box p { margin: 0 0 12px 0; }
+    .btn-retry {
+      background: #4f46e5;
+      color: white;
+      border: none;
+      padding: 8px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .btn-retry:hover { background: #4338ca; }
+
     /* --- TABLA --- */
+    .table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border-radius: 12px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
     .payment-table {
       width: 100%;
       border-collapse: collapse;
       background: white;
-      border-radius: 12px;
-      overflow: hidden;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+      min-width: 760px;
     }
     .payment-table th,
     .payment-table td {
@@ -194,6 +262,7 @@ import { Payment } from '../../models/user.model';
       padding: 12px 14px;
       text-align: left;
       font-size: 13px;
+      white-space: nowrap;
     }
     .payment-table th {
       background: #f8fafc;
@@ -203,9 +272,7 @@ import { Payment } from '../../models/user.model';
       font-size: 11px;
       letter-spacing: 0.5px;
     }
-    .payment-table tbody tr:hover {
-      background: #f8fafc;
-    }
+    .payment-table tbody tr:hover { background: #f8fafc; }
     .payment-table code {
       background: #f1f5f9;
       padding: 2px 6px;
@@ -216,6 +283,7 @@ import { Payment } from '../../models/user.model';
 
     /* --- BADGES --- */
     .badge-success {
+      display: inline-block;
       background: #dcfce7;
       color: #166534;
       padding: 4px 10px;
@@ -224,6 +292,7 @@ import { Payment } from '../../models/user.model';
       font-weight: 700;
     }
     .badge-warning {
+      display: inline-block;
       background: #fef9c3;
       color: #854d0e;
       padding: 4px 10px;
@@ -243,30 +312,52 @@ import { Payment } from '../../models/user.model';
       font-size: 12px;
       cursor: pointer;
       transition: background 0.15s;
+      font-family: inherit;
     }
     .btn-approve:hover:not(:disabled) { background: #3730a3; }
-    .btn-approve:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
+    .btn-approve:disabled { opacity: 0.6; cursor: not-allowed; }
     .approved-text {
       color: #059669;
       font-size: 12px;
       font-weight: 600;
     }
 
+    /* --- MENSAJES INLINE --- */
+    .inline-msg {
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      margin-top: 16px;
+      text-align: center;
+    }
+    .inline-msg.success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+    .inline-msg.error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+
     /* --- RESPONSIVE --- */
     @media (max-width: 768px) {
       .admin-container { padding: 16px; }
-      .payment-table { font-size: 12px; display: block; overflow-x: auto; }
+      .admin-header h2 { font-size: 20px; }
       .admin-user { display: none; }
+      .payment-table { min-width: 640px; }
+    }
+    @media (max-width: 480px) {
+      .admin-container { padding: 12px; }
+      .admin-header h2 { font-size: 18px; }
+      .btn-back { font-size: 12px; padding: 7px 12px; }
+      .btn-logout { font-size: 12px; padding: 7px 12px; }
     }
   `]
 })
 export class AdminPagosComponent implements OnInit {
-  authService = inject(AuthService);  // público para usarlo en el template
+  authService = inject(AuthService);
+  private cdr = inject(ChangeDetectorRef);
+
   payments: Payment[] = [];
-  loading = false;
+  loading = true;
+  errorMsg = '';
+  actionMsg = '';
+  actionError = '';
   approvingId: string | null = null;
 
   ngOnInit() {
@@ -275,26 +366,71 @@ export class AdminPagosComponent implements OnInit {
 
   loadPayments() {
     this.loading = true;
-    this.authService.getAllPaymentsAdmin().subscribe({
+    this.errorMsg = '';
+    this.actionMsg = '';
+    this.actionError = '';
+
+    console.log('[AdminPagos] Iniciando loadPayments...');
+    console.log('[AdminPagos] Token:', this.authService.getToken());
+    console.log('[AdminPagos] currentUser:', this.authService.currentUser());
+
+    this.authService.getAllPaymentsAdmin().pipe(
+      timeout(10000),
+      catchError((err) => {
+        console.error('[AdminPagos] Error capturado:', err);
+        console.error('[AdminPagos] Status:', err?.status);
+        console.error('[AdminPagos] Message:', err?.message);
+        console.error('[AdminPagos] Error body:', err?.error);
+
+        if (err.name === 'TimeoutError') {
+          this.errorMsg = 'La petición tardó demasiado. Verifica que el backend esté corriendo.';
+        } else if (err.status === 401) {
+          this.errorMsg = 'Sesión expirada. Vuelve a iniciar sesión.';
+        } else if (err.status === 403) {
+          this.errorMsg = 'No tienes permisos de administrador.';
+        } else if (err.status === 0) {
+          this.errorMsg = 'No se pudo conectar con el servidor. Verifica que el backend esté activo.';
+        } else {
+          this.errorMsg = err.error?.message || 'Error al cargar los pagos.';
+        }
+        this.loading = false;
+        this.cdr.detectChanges();
+        return of([]);
+      })
+    ).subscribe({
       next: (data) => {
-        this.payments = data;
+        console.log('[AdminPagos] Datos recibidos:', data);
+        console.log('[AdminPagos] Cantidad:', data?.length);
+        console.log('[AdminPagos] errorMsg antes:', JSON.stringify(this.errorMsg));
+        this.payments = data || [];
         this.loading = false;
+        console.log('[AdminPagos] payments.length:', this.payments.length);
+        console.log('[AdminPagos] errorMsg después:', JSON.stringify(this.errorMsg));
+        this.cdr.detectChanges();
       },
-      error: () => {
-        this.loading = false;
+      complete: () => {
+        console.log('[AdminPagos] Observable completado. loading =', this.loading);
       }
     });
   }
 
   approve(id: string) {
+    this.actionMsg = '';
+    this.actionError = '';
     this.approvingId = id;
+
     this.authService.approvePayment(id).subscribe({
       next: () => {
+        this.actionMsg = `Pago ${id} aprobado correctamente.`;
         this.approvingId = null;
+        this.cdr.detectChanges();
         this.loadPayments();
       },
-      error: () => {
+      error: (err) => {
+        console.error('[AdminPagos] Error al aprobar:', err);
+        this.actionError = err.error?.message || 'No se pudo aprobar el pago.';
         this.approvingId = null;
+        this.cdr.detectChanges();
       }
     });
   }
