@@ -1,6 +1,92 @@
-import { Component, NgZone, OnDestroy } from '@angular/core';
+import { Component, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms'; 
+import { FormsModule } from '@angular/forms';
+
+type Axis = 'x' | 'y' | 'z';
+type Mat3 = number[][];
+
+interface MoveDef {
+  axis: Axis;
+  layers: number[]; // capas afectadas (coordenada -1, 0, 1 sobre el eje)
+  dir: 1 | -1;      // -1 = horario visto desde la cara +eje
+  label: string;
+}
+
+interface Face {
+  name: string;
+  color: string | null;
+}
+
+interface Cubie {
+  id: number;
+  R: Mat3;
+  p: number[];
+  css: string;
+  active: boolean;
+  faces: Face[];
+}
+
+const S = 60; // tamaño de cada cubito en px
+
+/**
+ * Sistema lógico: x → derecha, y → arriba, z → hacia el observador (mano derecha).
+ * Giro horario visto desde la cara +eje = -90° sobre ese eje.
+ */
+const MOVE_DEFS: Record<string, MoveDef> = {
+  R: { axis: 'x', layers: [1],        dir: -1, label: 'Capa derecha' },
+  L: { axis: 'x', layers: [-1],       dir:  1, label: 'Capa izquierda' },
+  U: { axis: 'y', layers: [1],        dir: -1, label: 'Capa superior' },
+  D: { axis: 'y', layers: [-1],       dir:  1, label: 'Capa inferior' },
+  F: { axis: 'z', layers: [1],        dir: -1, label: 'Capa frontal' },
+  B: { axis: 'z', layers: [-1],       dir:  1, label: 'Capa trasera' },
+
+  r: { axis: 'x', layers: [1, 0],     dir: -1, label: 'Derecha + centro' },
+  l: { axis: 'x', layers: [-1, 0],    dir:  1, label: 'Izquierda + centro' },
+  u: { axis: 'y', layers: [1, 0],     dir: -1, label: 'Arriba + centro' },
+  d: { axis: 'y', layers: [-1, 0],    dir:  1, label: 'Abajo + centro' },
+  f: { axis: 'z', layers: [1, 0],     dir: -1, label: 'Frente + centro' },
+  b: { axis: 'z', layers: [-1, 0],    dir:  1, label: 'Atrás + centro' },
+
+  M: { axis: 'x', layers: [0],        dir:  1, label: 'Capa central (sentido de L)' },
+  E: { axis: 'y', layers: [0],        dir:  1, label: 'Capa central (sentido de D)' },
+  S: { axis: 'z', layers: [0],        dir: -1, label: 'Capa central (sentido de F)' },
+
+  x: { axis: 'x', layers: [-1, 0, 1], dir: -1, label: 'Todo el cubo (sentido de R)' },
+  y: { axis: 'y', layers: [-1, 0, 1], dir: -1, label: 'Todo el cubo (sentido de U)' },
+  z: { axis: 'z', layers: [-1, 0, 1], dir: -1, label: 'Todo el cubo (sentido de F)' },
+};
+
+const AXIS_INDEX: Record<Axis, number> = { x: 0, y: 1, z: 2 };
+
+const STEP_FACTORS = [1, -1, 2, 2];
+const STEP_DESC = [
+  'Giro de 90° en sentido horario',
+  'Su inverso: 90° antihorario',
+  'Medio giro: 180°',
+  'Otro medio giro: vuelve al inicio',
+];
+
+const IDENTITY = (): Mat3 => [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+
+function matMul(A: Mat3, B: Mat3): Mat3 {
+  const out: Mat3 = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let i = 0; i < 3; i++)
+    for (let j = 0; j < 3; j++)
+      for (let k = 0; k < 3; k++) out[i][j] += A[i][k] * B[k][j];
+  return out;
+}
+
+function matVec(A: Mat3, v: number[]): number[] {
+  return [0, 1, 2].map(i => A[i][0] * v[0] + A[i][1] * v[1] + A[i][2] * v[2]);
+}
+
+function rotMat(axis: Axis, rad: number): Mat3 {
+  const c = Math.cos(rad), s = Math.sin(rad);
+  if (axis === 'x') return [[1, 0, 0], [0, c, -s], [0, s, c]];
+  if (axis === 'y') return [[c, 0, s], [0, 1, 0], [-s, 0, c]];
+  return [[c, -s, 0], [s, c, 0], [0, 0, 1]];
+}
+
 @Component({
   selector: 'app-guide',
   standalone: true,
@@ -53,50 +139,48 @@ import { FormsModule } from '@angular/forms';
         <h2 class="modal-title">Movimiento {{ currentMove }}</h2>
 
         <div class="modal-body">
-          <!-- CUBO 3D -->
-          <div class="cube-container">
+          <!-- CUBO 3D (arrastrable, pero se mueve solo al reproducir) -->
+          <div class="cube-container"
+               (pointerdown)="onPointerDown($event)"
+               (pointermove)="onPointerMove($event)"
+               (pointerup)="onPointerUp($event)"
+               (pointercancel)="onPointerUp($event)">
             <div class="scene">
-              <!-- 🔧 transition aplicada al cubo para que la animación sea fluida -->
-              <div class="cube"
-                   [style.transform]="'rotateX(-25deg) rotateY(-35deg) ' + rotationState"
-                   [style.transition-duration]="transitionDuration">
-                <div class="face front" [class.highlight]="highlightSet === 'F'">
-                  <div class="sticker" *ngFor="let i of [1,2,3,4,5,6,7,8,9]"></div>
-                </div>
-                <div class="face back" [class.highlight]="highlightSet === 'B'">
-                  <div class="sticker" *ngFor="let i of [1,2,3,4,5,6,7,8,9]"></div>
-                </div>
-                <div class="face right" [class.highlight]="highlightSet === 'R'">
-                  <div class="sticker" *ngFor="let i of [1,2,3,4,5,6,7,8,9]"></div>
-                </div>
-                <div class="face left" [class.highlight]="highlightSet === 'L'">
-                  <div class="sticker" *ngFor="let i of [1,2,3,4,5,6,7,8,9]"></div>
-                </div>
-                <div class="face top" [class.highlight]="highlightSet === 'U'">
-                  <div class="sticker" *ngFor="let i of [1,2,3,4,5,6,7,8,9]"></div>
-                </div>
-                <div class="face bottom" [class.highlight]="highlightSet === 'D'">
-                  <div class="sticker" *ngFor="let i of [1,2,3,4,5,6,7,8,9]"></div>
+              <div class="cube-view" [style.transform]="viewTransform">
+                <div class="cubie"
+                     *ngFor="let c of cubies; trackBy: trackCubie"
+                     [class.dim]="!c.active"
+                     [class.active]="c.active"
+                     [style.transform]="c.css">
+                  <div class="face" *ngFor="let f of c.faces" [ngClass]="f.name">
+                    <div class="sticker" *ngIf="f.color" [style.background]="f.color"></div>
+                  </div>
                 </div>
               </div>
             </div>
+            <div class="drag-hint">↻ Opcional: arrastra para ver el cubo desde otro ángulo</div>
           </div>
 
           <!-- CONTROLES -->
           <div class="modal-controls">
             <p class="modal-desc">Observa {{ currentMove }}, su inverso y dos medios giros. La secuencia termina como empezó.</p>
 
+            <div class="layer-badge">
+              <span class="dot"></span>
+              Se mueve: <strong>{{ layerLabel }}</strong>
+            </div>
+
             <div class="sequence-box">
               <span *ngFor="let step of sequence; let i = index; trackBy: trackByStep"
-                    [class.active-step]="currentStepIndex === i"
+                    [class.active-step]="playing && currentStepIndex === i"
+                    [class.done-step]="(playing && currentStepIndex > i) || finished"
                     class="step-text">
                 {{ step }}
               </span>
             </div>
 
             <div class="sequence-meta">
-              Movimiento {{ displayStep }} / 4 ·
-              {{ statusText }}
+              Movimiento {{ displayStep }} / 4 · {{ statusText }}
             </div>
 
             <div class="control-actions">
@@ -107,7 +191,6 @@ import { FormsModule } from '@angular/forms';
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                 {{ playing ? 'Reproduciendo...' : 'Reproducir' }}
               </button>
-              <!-- 🔧 select conectado con [(ngModel)] -->
               <select class="speed-select" [(ngModel)]="speed">
                 <option value="slow">Lento</option>
                 <option value="normal">Normal</option>
@@ -115,7 +198,7 @@ import { FormsModule } from '@angular/forms';
               </select>
             </div>
 
-            <p class="modal-footer-text">Selecciona una letra para ver el cubo después de ese movimiento. El frente inicial es rojo; arriba, amarillo.</p>
+            <p class="modal-footer-text">Las piezas con borde índigo son las que giran; las atenuadas se quedan quietas. El frente inicial es rojo; arriba, amarillo.</p>
           </div>
         </div>
       </div>
@@ -181,47 +264,58 @@ import { FormsModule } from '@angular/forms';
       flex: 1 1 320px;
       background: #f8fafc; border-radius: 16px;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      padding: 32px; min-height: 300px;
-      perspective: 1200px;
+      padding: 32px; min-height: 340px;
+      perspective: 900px;
+      cursor: grab; touch-action: none; user-select: none;
     }
-    .scene { width: 180px; height: 180px; perspective: 1200px; }
+    .cube-container:active { cursor: grabbing; }
 
-    /* 🔧 CLAVE: transition para que el cubo gire suavemente */
-    .cube {
-      width: 100%; height: 100%; position: relative;
+    .scene { width: 180px; height: 180px; position: relative; transform-style: preserve-3d; }
+    .cube-view {
+      position: absolute; inset: 0;
       transform-style: preserve-3d;
-      transition: transform 0.6s cubic-bezier(0.4, 0.0, 0.2, 1);
-      transition-property: transform;
+    }
+
+    .cubie {
+      position: absolute; left: 50%; top: 50%;
+      width: 60px; height: 60px; margin: -30px 0 0 -30px;
+      transform-style: preserve-3d;
     }
 
     .face {
-      position: absolute; width: 180px; height: 180px;
-      display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
-      gap: 4px; padding: 4px; background: #1e293b; border-radius: 8px; box-sizing: border-box;
-      transition: outline-color 0.2s;
+      position: absolute; width: 60px; height: 60px;
+      background: #0f172a; padding: 3px;
+      border-radius: 4px;
+      backface-visibility: hidden;
     }
-    .sticker { border-radius: 6px; box-shadow: inset 0 0 4px rgba(0,0,0,0.2); }
+    .sticker {
+      width: 100%; height: 100%; border-radius: 6px;
+      box-shadow: inset 0 0 6px rgba(0,0,0,0.25);
+    }
 
-    .front .sticker  { background: #f87171; }
-    .top .sticker    { background: #fcd34d; }
-    .right .sticker  { background: #60a5fa; }
-    .left .sticker   { background: #34d399; }
-    .back .sticker   { background: #fb923c; }
-    .bottom .sticker { background: #f8fafc; }
+    .face.front  { transform: rotateY(0deg)   translateZ(30px); }
+    .face.back   { transform: rotateY(180deg) translateZ(30px); }
+    .face.right  { transform: rotateY(90deg)  translateZ(30px); }
+    .face.left   { transform: rotateY(-90deg) translateZ(30px); }
+    .face.top    { transform: rotateX(90deg)  translateZ(30px); }
+    .face.bottom { transform: rotateX(-90deg) translateZ(30px); }
 
-    .front  { transform: rotateY(0deg) translateZ(90px); }
-    .back   { transform: rotateY(180deg) translateZ(90px); }
-    .right  { transform: rotateY(90deg) translateZ(90px); }
-    .left   { transform: rotateY(-90deg) translateZ(90px); }
-    .top    { transform: rotateX(90deg) translateZ(90px); }
-    .bottom { transform: rotateX(-90deg) translateZ(90px); }
+    /* Los filtros van en el sticker (no en el cubito) para no romper el 3D */
+    .cubie.dim .sticker { opacity: 0.35; filter: grayscale(0.7); }
+    .cubie.active .sticker { box-shadow: inset 0 0 0 3px #4f46e5; }
 
-    .face.highlight { outline: 3px solid #4f46e5; outline-offset: 2px; }
-    .face.highlight .sticker { filter: brightness(1.2); }
+    .drag-hint { margin-top: 28px; font-size: 12px; color: #94a3b8; text-align: center; }
 
     /* --- CONTROLES --- */
     .modal-controls { flex: 1 1 320px; display: flex; flex-direction: column; justify-content: center; }
     .modal-desc { font-size: 15px; color: #475569; line-height: 1.6; margin: 0 0 16px 0; }
+
+    .layer-badge {
+      display: inline-flex; align-items: center; gap: 8px; align-self: flex-start;
+      background: #eef2ff; color: #4338ca; font-size: 13px;
+      padding: 6px 12px; border-radius: 999px; margin-bottom: 14px;
+    }
+    .layer-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: #4f46e5; }
 
     .sequence-box {
       background: #eef2ff; color: #94a3b8;
@@ -230,10 +324,11 @@ import { FormsModule } from '@angular/forms';
       letter-spacing: 3px; margin-bottom: 12px;
       display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     }
-    .step-text { transition: color 0.2s; }
+    .step-text { transition: color 0.2s, background 0.2s; padding: 2px 8px; border-radius: 6px; }
+    .done-step { color: #6366f1; }
     .active-step {
-      color: #4f46e5; background: white;
-      padding: 2px 8px; border-radius: 6px; font-weight: 700;
+      color: #4f46e5; background: white; font-weight: 700;
+      box-shadow: 0 1px 4px rgba(79, 70, 229, 0.3);
     }
 
     .sequence-meta { font-size: 13px; color: #64748b; margin-bottom: 20px; min-height: 18px; }
@@ -275,7 +370,7 @@ import { FormsModule } from '@angular/forms';
     /* --- RESPONSIVE --- */
     @media (max-width: 900px) {
       .modal-body { flex-direction: column; gap: 24px; }
-      .cube-container { padding: 24px; min-height: 260px; width: 100%; }
+      .cube-container { padding: 24px; min-height: 300px; width: 100%; }
       .modal-controls { width: 100%; }
     }
 
@@ -284,14 +379,7 @@ import { FormsModule } from '@angular/forms';
       .page-subtitle { font-size: 14px; }
       .modal-content { padding: 20px; border-radius: 12px; }
       .modal-title { font-size: 22px; }
-      .scene { width: 150px; height: 150px; }
-      .face { width: 150px; height: 150px; }
-      .front  { transform: rotateY(0deg) translateZ(75px); }
-      .back   { transform: rotateY(180deg) translateZ(75px); }
-      .right  { transform: rotateY(90deg) translateZ(75px); }
-      .left   { transform: rotateY(-90deg) translateZ(75px); }
-      .top    { transform: rotateX(90deg) translateZ(75px); }
-      .bottom { transform: rotateX(-90deg) translateZ(75px); }
+      .scene { transform: scale(0.8); }
       .sequence-box { font-size: 15px; letter-spacing: 2px; padding: 12px 16px; }
       .control-actions { gap: 6px; }
       .btn-play-large { padding: 0 16px; font-size: 14px; }
@@ -301,20 +389,24 @@ import { FormsModule } from '@angular/forms';
 export class GuideComponent implements OnDestroy {
   modalOpen = false;
   currentMove = 'R';
-  highlightSet = '';
 
-  // 🔧 Estado de rotación acumulada (no string de un solo paso)
-  rotationState = '';
-  transitionDuration = '600ms';
-
+  cubies: Cubie[] = [];
   sequence: string[] = [];
   currentStepIndex = 0;
   playing = false;
-
-  // 🔧 Velocidad conectada al select
+  finished = false;
   speed: 'slow' | 'normal' | 'fast' = 'normal';
 
+  // Vista (arrastrable)
+  viewX = -25;
+  viewY = -35;
+  private dragging = false;
+  private lastX = 0;
+  private lastY = 0;
+
   private timers: any[] = [];
+  private rafId: number | null = null;
+  private destroyed = false;
 
   moves = [
     { name: 'R / R′ / R2', desc: 'Derecha', base: 'R' },
@@ -337,23 +429,37 @@ export class GuideComponent implements OnDestroy {
     { name: 'z / z′ / z2', desc: 'Todo el cubo, en el sentido de F', base: 'z' },
   ];
 
-  constructor(private ngZone: NgZone) {}
+  constructor(private cdr: ChangeDetectorRef) {}
 
   ngOnDestroy() {
-    this.clearTimers();
+    this.destroyed = true;
+    this.stopAll();
+  }
+
+  /** Fuerza el repintado (funciona con zone.js y también sin zone). */
+  private refresh() {
+    if (!this.destroyed) this.cdr.detectChanges();
   }
 
   // ============ GETTERS DE UI ============
 
+  get viewTransform(): string {
+    return `rotateX(${this.viewX}deg) rotateY(${this.viewY}deg)`;
+  }
+
+  get layerLabel(): string {
+    return MOVE_DEFS[this.currentMove]?.label ?? '';
+  }
+
   get displayStep(): number {
-    if (this.currentStepIndex >= 4) return 4;
+    if (this.finished) return 4;
     if (this.playing) return this.currentStepIndex + 1;
     return 0;
   }
 
   get statusText(): string {
-    if (this.playing) return 'Reproduciendo...';
-    if (this.currentStepIndex >= 4) return 'Secuencia terminada';
+    if (this.playing) return STEP_DESC[this.currentStepIndex] ?? 'Reproduciendo...';
+    if (this.finished) return 'Secuencia terminada';
     return 'Caso inicial';
   }
 
@@ -361,140 +467,230 @@ export class GuideComponent implements OnDestroy {
     return index + '-' + step;
   }
 
+  trackCubie(_: number, c: Cubie): number {
+    return c.id;
+  }
+
+  // ============ ARRASTRE (VISTA 3D, OPCIONAL) ============
+
+  onPointerDown(e: PointerEvent) {
+    this.dragging = true;
+    this.lastX = e.clientX;
+    this.lastY = e.clientY;
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  }
+
+  onPointerMove(e: PointerEvent) {
+    if (!this.dragging) return;
+    const dx = e.clientX - this.lastX;
+    const dy = e.clientY - this.lastY;
+    this.lastX = e.clientX;
+    this.lastY = e.clientY;
+    this.viewY += dx * 0.5;
+    this.viewX = Math.max(-89, Math.min(89, this.viewX - dy * 0.5));
+  }
+
+  onPointerUp(e: PointerEvent) {
+    this.dragging = false;
+    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+  }
+
   // ============ MODAL ============
 
   abrirModal(move: string) {
+    this.stopAll();
     this.currentMove = move;
-    this.sequence = [`${move}`, `${move}'`, `${move}2`, `${move}2`];
-    this.currentStepIndex = 0;
-    this.rotationState = '';
-    this.highlightSet = move;
-    this.playing = false;
-    this.clearTimers();
+    this.sequence = [`${move}`, `${move}′`, `${move}2`, `${move}2`];
+    this.setBestView();
+    this.buildCube();
     this.modalOpen = true;
   }
 
   cerrarModal() {
     this.modalOpen = false;
-    this.playing = false;
-    this.clearTimers();
+    this.stopAll();
   }
 
   reset() {
-    this.clearTimers();
-    this.rotationState = '';
-    this.highlightSet = this.currentMove;
-    this.currentStepIndex = 0;
-    this.playing = false;
+    this.stopAll();
+    this.buildCube();
   }
 
-  // ============ REPRODUCCIÓN ============
+  /** Orienta la cámara para que la capa que se mueve quede a la vista. */
+  private setBestView() {
+    const def = MOVE_DEFS[this.currentMove];
+    const sign = def.layers.includes(1) ? 1 : def.layers.includes(-1) ? -1 : 0;
+    let vx = -25;
+    let vy = -35;
+
+    if (def.axis === 'x' && sign === -1) vy = 35;     // izquierda visible
+    if (def.axis === 'y' && sign === -1) vx = 25;     // abajo visible
+    if (def.axis === 'z' && sign === -1) vy = 145;    // atrás visible
+
+    this.viewX = vx;
+    this.viewY = vy;
+  }
+
+  // ============ MODELO DEL CUBO ============
+
+  private buildCube() {
+    const def = MOVE_DEFS[this.currentMove];
+    const ai = AXIS_INDEX[def.axis];
+    const cubies: Cubie[] = [];
+    let id = 0;
+
+    for (let x = -1; x <= 1; x++) {
+      for (let y = -1; y <= 1; y++) {
+        for (let z = -1; z <= 1; z++) {
+          const p = [x, y, z];
+          const cubie: Cubie = {
+            id: id++,
+            R: IDENTITY(),
+            p,
+            css: '',
+            active: def.layers.includes(p[ai]),
+            faces: [
+              { name: 'front',  color: z ===  1 ? '#f87171' : null }, // rojo
+              { name: 'back',   color: z === -1 ? '#fb923c' : null }, // naranja
+              { name: 'right',  color: x ===  1 ? '#60a5fa' : null }, // azul
+              { name: 'left',   color: x === -1 ? '#34d399' : null }, // verde
+              { name: 'top',    color: y ===  1 ? '#fcd34d' : null }, // amarillo
+              { name: 'bottom', color: y === -1 ? '#f8fafc' : null }, // blanco
+            ],
+          };
+          this.updateCss(cubie, cubie.R, cubie.p);
+          cubies.push(cubie);
+        }
+      }
+    }
+
+    this.cubies = cubies;
+    this.currentStepIndex = 0;
+    this.playing = false;
+    this.finished = false;
+    this.refresh();
+  }
+
+  /** Convierte rotación/posición lógicas (y arriba) a matrix3d de CSS (y abajo). */
+  private updateCss(c: Cubie, R: Mat3, p: number[]) {
+    const f = [1, -1, 1];
+    const m = (i: number, j: number) => {
+      const v = f[i] * R[i][j] * f[j];
+      return Math.abs(v) < 1e-9 ? 0 : v;
+    };
+    const tx = p[0] * S;
+    const ty = -p[1] * S;
+    const tz = p[2] * S;
+    c.css =
+      `matrix3d(${m(0, 0)},${m(1, 0)},${m(2, 0)},0,` +
+      `${m(0, 1)},${m(1, 1)},${m(2, 1)},0,` +
+      `${m(0, 2)},${m(1, 2)},${m(2, 2)},0,` +
+      `${tx},${ty},${tz},1)`;
+  }
+
+  // ============ REPRODUCCIÓN AUTOMÁTICA ============
 
   reproducirSecuencia() {
     if (this.playing) return;
-    this.clearTimers();
-    this.rotationState = '';
-    this.highlightSet = this.currentMove;
-    this.currentStepIndex = 0;
+    this.stopAll();
+    this.buildCube();
     this.playing = true;
-
-    // pequeña pausa para que el reset se vea antes de empezar
-    this.scheduleNext(0, 200);
-  }
-
-  private scheduleNext(index: number, delay: number) {
-    const t = setTimeout(() => {
-      this.ngZone.run(() => this.ejecutarPaso(index));
-    }, delay);
-    this.timers.push(t);
+    this.refresh();
+    // Pequeña pausa para ver el cubo quieto y luego empieza solo
+    this.schedule(() => this.ejecutarPaso(0), 400);
   }
 
   private ejecutarPaso(index: number) {
-    if (index >= this.sequence.length) {
+    if (index >= STEP_FACTORS.length) {
       this.playing = false;
-      this.currentStepIndex = 4;
-      this.highlightSet = this.currentMove;
+      this.finished = true;
+      this.refresh();
       return;
     }
 
     this.currentStepIndex = index;
-    this.highlightSet = this.currentMove;
+    this.refresh();
 
-    // 🔧 Calculamos el ángulo acumulado según el paso
-    const { axis, angle } = this.getRotationForStep(index);
+    const def = MOVE_DEFS[this.currentMove];
+    const ai = AXIS_INDEX[def.axis];
+    const moving = this.cubies.filter(c => def.layers.includes(c.p[ai]));
 
-    // 🔧 Aplicamos la rotación ACUMULADA sobre el estado actual
-    // (no reemplazamos el transform, sumamos)
-    this.rotationState = this.buildRotationState(axis, angle);
+    const factor = STEP_FACTORS[index];
+    const angleDeg = def.dir * 90 * factor;
+    const duration = this.getSpeedMs() * (Math.abs(factor) === 2 ? 1.4 : 1);
 
-    const speedMs = this.getSpeedMs();
-    this.transitionDuration = `${Math.max(150, speedMs)}ms`;
-
-    // Espera a que termine la animación + un pequeño margen
-    this.scheduleNext(index + 1, speedMs + 250);
+    this.animateLayer(def.axis, moving, angleDeg, duration, () => {
+      // Pausa entre movimientos y pasa solo al siguiente
+      this.schedule(() => this.ejecutarPaso(index + 1), this.getPauseMs());
+    });
   }
 
-  /**
-   * Devuelve el eje y el ángulo (en grados) para el paso i de la secuencia.
-   * La secuencia es: [base, base', base2, base2]
-   *   - base  → +90° (o -90° según la cara)
-   *   - base' → vuelve a 0°  (es el inverso, -90°)
-   *   - base2 → +180° (desde 0)
-   *   - base2 → vuelve a 0° (segundo medio giro)
-   */
-  private getRotationForStep(index: number): { axis: string; angle: number } {
-    const baseMove = this.currentMove.toUpperCase();
-    let axis = '';
-    let sign = 1;
+  private animateLayer(axis: Axis, moving: Cubie[], angleDeg: number, duration: number, done: () => void) {
+    const start = performance.now();
+    const snapshot = moving.map(c => ({ c, R: c.R, p: c.p.slice() }));
+    const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 
-    if (['R', 'L', 'M', 'X'].includes(baseMove)) {
-      axis = 'rotateY';
-      sign = baseMove === 'R' || baseMove === 'X' ? -1 : 1;
-      if (baseMove === 'M') sign = 1;
-    } else if (['U', 'D', 'E', 'Y'].includes(baseMove)) {
-      axis = 'rotateX';
-      sign = baseMove === 'U' || baseMove === 'Y' ? -1 : 1;
-      if (baseMove === 'E') sign = 1;
-    } else if (['F', 'B', 'S', 'Z'].includes(baseMove)) {
-      axis = 'rotateZ';
-      sign = baseMove === 'F' || baseMove === 'Z' ? -1 : 1;
-      if (baseMove === 'S') sign = 1;
-    }
+    const frame = (now: number) => {
+      if (this.destroyed) return;
+      const t = Math.min(1, (now - start) / duration);
+      const phi = (angleDeg * ease(t) * Math.PI) / 180;
+      const Rot = rotMat(axis, phi);
 
-    // Ángulo absoluto del paso i (acumulado desde 0)
-    // i=0: +90° (base)
-    // i=1: 0°   (vuelve, porque base' es -90°)
-    // i=2: +180° (base2 es +180° desde 0, no desde 90 → pero visualmente queremos que gire)
-    // i=3: 0°   (segundo base2 vuelve a 0)
-    //
-    // Para que la animación se vea bien, en i=2 usamos 180° acumulado.
-    // En i=3 volvemos a 0.
+      for (const s of snapshot) {
+        this.updateCss(s.c, matMul(Rot, s.R), matVec(Rot, s.p));
+      }
+      this.refresh();
 
-    const cumulativeAngles = [1, 0, 2, 0]; // en múltiplos de 90°
-    const angle = sign * 90 * cumulativeAngles[index];
+      if (t < 1) {
+        this.rafId = requestAnimationFrame(frame);
+      } else {
+        // Estado final con enteros exactos (sin errores de coma flotante)
+        const Fin = rotMat(axis, (angleDeg * Math.PI) / 180);
+        for (const s of snapshot) {
+          const R = matMul(Fin, s.R).map(row => row.map(v => Math.round(v) + 0));
+          const p = matVec(Fin, s.p).map(v => Math.round(v) + 0);
+          s.c.R = R;
+          s.c.p = p;
+          this.updateCss(s.c, R, p);
+        }
+        this.rafId = null;
+        this.refresh();
+        done();
+      }
+    };
 
-    return { axis, angle };
-  }
-
-  /**
-   * Construye el string de transform. La rotación base de vista
-   * (rotateX(-25deg) rotateY(-35deg)) la aplica el template fuera de rotationState.
-   */
-  private buildRotationState(axis: string, angle: number): string {
-    if (!axis || angle === 0) return '';
-    return `${axis}(${angle}deg)`;
+    this.rafId = requestAnimationFrame(frame);
   }
 
   private getSpeedMs(): number {
     switch (this.speed) {
       case 'slow': return 1200;
       case 'fast': return 350;
-      default: return 600;
+      default: return 650;
     }
   }
 
-  private clearTimers() {
+  private getPauseMs(): number {
+    switch (this.speed) {
+      case 'slow': return 700;
+      case 'fast': return 250;
+      default: return 450;
+    }
+  }
+
+  private schedule(fn: () => void, delay: number) {
+    this.timers.push(setTimeout(() => {
+      if (!this.destroyed) fn();
+    }, delay));
+  }
+
+  private stopAll() {
     this.timers.forEach(t => clearTimeout(t));
     this.timers = [];
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    this.playing = false;
   }
 }
